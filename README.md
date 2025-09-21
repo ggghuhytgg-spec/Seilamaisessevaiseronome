@@ -3,24 +3,18 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local char, hrp, humanoid
 
 -- CONFIG DEFAULT
-local FLOAT_HEIGHT = 12
 local MOVE_SPEED_AIR = 24
-local ASCEND_SPEED = 30
-local HOVER_SMOOTH = 8
-local TILT_ANGLE = math.rad(12)
+local subidaSpeed = 10 -- velocidade padrão da subida infinita
 
 -- FLAGS
-local floating = false
 local airwalk = false
 local godmode = false
-
-local vectorForce, att, alignOri
+local subidaInfinita = false
 
 -- GUI
 local gui = Instance.new("ScreenGui")
@@ -29,9 +23,11 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 220, 0, 220)
+main.Size = UDim2.new(0, 220, 0, 250)
 main.Position = UDim2.new(0.7, 0, 0.2, 0)
 main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+main.BackgroundTransparency = 0.1
+main.BorderSizePixel = 0
 main.Active = true
 main.Draggable = true
 main.Parent = gui
@@ -65,7 +61,7 @@ local function createButton(text,posY,color)
     return btn
 end
 
--- Função criar sliders
+-- Função criar slider
 local function createSlider(name,posY,default,callback)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0,100,0,20)
@@ -96,13 +92,13 @@ local function createSlider(name,posY,default,callback)
 end
 
 -- Botões
-local toggle = createButton("Ativar Float",40,Color3.fromRGB(0,120,255))
-local airwalkBtn = createButton("Ativar AirWalk",75,Color3.fromRGB(150,0,255))
-local godBtn = createButton("Ativar GodMode",110,Color3.fromRGB(0,200,100))
+local airwalkBtn = createButton("Ativar Andar no Ar",40,Color3.fromRGB(150,0,255))
+local godBtn = createButton("Ativar GodMode",75,Color3.fromRGB(0,200,100))
+local upBtn = createButton("Ativar Subida Infinita",110,Color3.fromRGB(255,140,0))
 
 -- Sliders
-createSlider("Altura:",150,FLOAT_HEIGHT,function(v) FLOAT_HEIGHT = v end)
-createSlider("Velocidade:",180,MOVE_SPEED_AIR,function(v) MOVE_SPEED_AIR = v end)
+createSlider("Vel. Andar:",170,MOVE_SPEED_AIR,function(v) MOVE_SPEED_AIR = v end)
+createSlider("Vel. Subida:",200,subidaSpeed,function(v) subidaSpeed = v end)
 
 -- Setup Character
 local function setupCharacter(c)
@@ -113,114 +109,68 @@ end
 if player.Character then setupCharacter(player.Character) end
 player.CharacterAdded:Connect(setupCharacter)
 
--- Float (corrigido)
-local function enableFloat()
-    if floating or not hrp then return end
-    floating = true
-
-    att = Instance.new("Attachment")
-    att.Parent = hrp
-
-    vectorForce = Instance.new("VectorForce")
-    vectorForce.Attachment0 = att
-    vectorForce.RelativeTo = Enum.ActuatorRelativeTo.World
-    vectorForce.ApplyAtCenterOfMass = true
-    vectorForce.Force = Vector3.new()
-    vectorForce.Parent = hrp
-
-    alignOri = Instance.new("AlignOrientation")
-    alignOri.Attachment0 = att
-    alignOri.Responsiveness = 50
-    alignOri.MaxTorque = 1e6
-    alignOri.RigidityEnabled = false
-    alignOri.Parent = hrp
-
-    toggle.Text = "Desativar Float"
-    toggle.BackgroundColor3 = Color3.fromRGB(200,50,50)
-end
-
-local function disableFloat()
-    floating = false
-    if vectorForce then vectorForce:Destroy() vectorForce = nil end
-    if alignOri then alignOri:Destroy() alignOri = nil end
-    if att then att:Destroy() att = nil end
-    toggle.Text = "Ativar Float"
-    toggle.BackgroundColor3 = Color3.fromRGB(0,120,255)
-end
-
-toggle.MouseButton1Click:Connect(function()
-    if floating then disableFloat() else enableFloat() end
-end)
-
--- AirWalk (NÃO MEXI)
+---------------------
+-- ANDAR NO AR
+---------------------
 airwalkBtn.MouseButton1Click:Connect(function()
     airwalk = not airwalk
-    if airwalk and hrp then
-        airwalkBtn.Text = "Desativar AirWalk"
+    if airwalk then
+        airwalkBtn.Text = "Desativar Andar no Ar"
         airwalkBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
-        humanoid.PlatformStand = true
     else
-        airwalkBtn.Text = "Ativar AirWalk"
+        airwalkBtn.Text = "Ativar Andar no Ar"
         airwalkBtn.BackgroundColor3 = Color3.fromRGB(150,0,255)
-        humanoid.PlatformStand = false
     end
 end)
 
--- GodMode travado
+---------------------
+-- GODMODE
+---------------------
 godBtn.MouseButton1Click:Connect(function()
     godmode = not godmode
-    if godmode then
+    if godmode and humanoid then
+        humanoid.MaxHealth = math.huge
+        humanoid.Health = math.huge
         godBtn.Text = "Desativar GodMode"
         godBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
-    else
+    elseif humanoid then
+        humanoid.MaxHealth = 100
+        humanoid.Health = 100
         godBtn.Text = "Ativar GodMode"
         godBtn.BackgroundColor3 = Color3.fromRGB(0,200,100)
     end
 end)
 
--- Loop principal
-RunService.Heartbeat:Connect(function(dt)
-    -- Float (mantém altura acima do chão definida pelo slider)
-    if floating and hrp and humanoid then
-        local moveDir = humanoid.MoveDirection
-
-        -- raycast pra baixo encontrar o chão
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Blacklist
-        rp.FilterDescendantsInstances = {char}
-        local down = Workspace:Raycast(hrp.Position, Vector3.new(0, -200, 0), rp)
-        local groundY = down and down.Position.Y or (hrp.Position.Y - FLOAT_HEIGHT)
-        local targetY = groundY + FLOAT_HEIGHT
-
-        local heightError = targetY - hrp.Position.Y
-        -- velocidade vertical desejada proporcional ao erro
-        local desiredVY = math.clamp(heightError * HOVER_SMOOTH, -ASCEND_SPEED, ASCEND_SPEED)
-
-        local desiredVel = Vector3.new(moveDir.X * MOVE_SPEED_AIR, desiredVY, moveDir.Z * MOVE_SPEED_AIR)
-        local mass = hrp.AssemblyMass
-        local accel = (desiredVel - hrp.Velocity) / math.max(dt, 1/60)
-        vectorForce.Force = accel * mass
-
-        -- orientação com tilt
-        if moveDir.Magnitude > 0.1 then
-            local tilt = CFrame.Angles(-TILT_ANGLE, 0, 0)
-            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(moveDir.X, 0, moveDir.Z)) * tilt
-        else
-            alignOri.CFrame = CFrame.new(hrp.Position, hrp.Position + hrp.CFrame.LookVector)
-        end
-    end
-
-    -- AirWalk (SEM ALTERAÇÕES)
-    if airwalk and hrp and humanoid then
-        local moveDir = humanoid.MoveDirection
-        hrp.Velocity = Vector3.new(moveDir.X * MOVE_SPEED_AIR, 0, moveDir.Z * MOVE_SPEED_AIR)
-    end
-
-    -- GodMode (mantém vida no máximo enquanto ativo)
-    if godmode and humanoid then
-        humanoid.MaxHealth = math.huge
-        humanoid.Health = math.huge
+---------------------
+-- SUBIDA INFINITA
+---------------------
+upBtn.MouseButton1Click:Connect(function()
+    subidaInfinita = not subidaInfinita
+    if subidaInfinita then
+        upBtn.Text = "Desativar Subida Infinita"
+        upBtn.BackgroundColor3 = Color3.fromRGB(200,50,50)
+    else
+        upBtn.Text = "Ativar Subida Infinita"
+        upBtn.BackgroundColor3 = Color3.fromRGB(255,140,0)
+        if hrp then hrp.Velocity = Vector3.zero end
     end
 end)
 
-print("[Float Superman GUI] Float corrigido — AirWalk não foi alterado.")
+---------------------
+-- LOOP PRINCIPAL
+---------------------
+RunService.Heartbeat:Connect(function(dt)
+    -- Andar no ar
+    if airwalk and hrp and humanoid then
+        local moveDir = humanoid.MoveDirection
+        local velocity = Vector3.new(moveDir.X * MOVE_SPEED_AIR, 0, moveDir.Z * MOVE_SPEED_AIR)
+        hrp.Velocity = velocity
+    end
+
+    -- Subida infinita
+    if subidaInfinita and hrp then
+        hrp.Velocity = Vector3.new(0,subidaSpeed,0)
+    end
+end)
+
+print("[Float Superman GUI] carregado com Andar no Ar, GodMode e Subida Infinita!")
